@@ -89,7 +89,9 @@ trigger() {
 refs() { git ls-remote "$1" "${2:-refs/heads/*}"; }
 
 wait_ready() {
-  local repo="${1:-$ROOT_REPO}" timeout="${2:-$((POLL_MINUTES*60))}" end=$(( $(date +%s)+timeout ))
+  local repo="${1:-$ROOT_REPO}"
+  local timeout="${2:-$((POLL_MINUTES*60))}"
+  local end=$(( $(date +%s) + timeout ))
   trigger "$repo"
   while [ "$(date +%s)" -lt "$end" ]; do
     repo_detail "$repo"
