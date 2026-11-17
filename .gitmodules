@@ -1,3 +1,6 @@
 [submodule "apisix"]
 	path = apisix
 	url = https://github.com/apache/apisix.git
+[submodule "nested/child"]
+	path = nested/child
+	url = ../10repo-sub-child.git
