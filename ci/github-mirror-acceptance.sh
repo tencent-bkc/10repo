@@ -102,7 +102,9 @@ mirror_url() { printf '%s/%s.git' "$TARGET_URL" "$1"; }
 source_url() { printf 'https://github.com/%s.git' "$1"; }
 
 decision() {
-  local repo="${1:-$ROOT_REPO}" headers="$WORK/headers-$(echo "$repo" | tr / -)"
+  local repo headers
+  repo="${1:-$ROOT_REPO}"
+  headers="$WORK/headers-$(echo "$repo" | tr / -)"
   DECISION_STATUS="$(curl -sS -o /dev/null -D "$headers" -w '%{http_code}' --max-redirs 0 \
     "$(mirror_url "$repo")/info/refs?service=git-upload-pack")"
   DECISION_LOCATION="$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");sub(/^[^:]+:[[:space:]]*/,"");print;exit}' "$headers")"
@@ -301,6 +303,17 @@ source_clone() {
   git -C "$dest" config user.email mirror-test@bkcode.invalid
 }
 
+push_test_commit() {
+  local dir="$1" branch="$2" index="$3" sha
+  printf '%s %s %s\n' "$branch" "$index" "$(date +%s%N)" >"$dir/.mirror-$branch-$index"
+  git -C "$dir" add ".mirror-$branch-$index"
+  git -C "$dir" commit -m "mirror test $branch $index"
+  git -C "$dir" push origin "HEAD:refs/heads/$branch"
+  sha="$(git -C "$dir" rev-parse HEAD)"
+  BRANCH_SHAS+=("$sha")
+  log "测试提交已推送: branch=$branch index=$index sha=$sha"
+}
+
 new_branch() {
   local dir="$1" branch="$2" count="${3:-1}"
   log "创建源仓库测试分支: branch=$branch commits=$count"
@@ -308,12 +321,7 @@ new_branch() {
   git -C "$dir" checkout -b "$branch" origin/main
   BRANCH_SHAS=()
   for i in $(seq 1 "$count"); do
-    printf '%s %s %s\n' "$branch" "$i" "$(date +%s%N)" >"$dir/.mirror-$branch-$i"
-    git -C "$dir" add ".mirror-$branch-$i"
-    git -C "$dir" commit -m "mirror test $branch $i"
-    git -C "$dir" push origin "HEAD:refs/heads/$branch"
-    BRANCH_SHAS+=("$(git -C "$dir" rev-parse HEAD)")
-    log "测试提交已推送: branch=$branch index=$i sha=${BRANCH_SHAS[-1]}"
+    push_test_commit "$dir" "$branch" "$i"
   done
 }
 
@@ -430,23 +438,30 @@ scenario_clone_modes() {
 
 scenario_fetch_incremental() {
   local started="$(date +%s)" branch="mirror-fetch-$BUILD_UID" src="$WORK/fetch-src"
-  step "1/6 等待镜像就绪"
+  local sha
+  step "1/7 等待镜像就绪"
   wait_ready
-  step "2/6 克隆镜像作为增量 Fetch 客户端"
+  step "2/7 克隆镜像作为增量 Fetch 客户端"
   clone_mirror "$WORK/fetch-client"
-  step "3/6 在 GitHub 源仓库创建两个测试提交"
-  new_branch "$src" "$branch" 2
-  local index=0
-  for sha in "${BRANCH_SHAS[@]}"; do
-    index=$((index+1))
-    step "$((index+3))/6 等待第 $index 个提交同步并从镜像 Fetch"
-    wait_ref "refs/heads/$branch" "$sha"
-    trace_git dev.bkcode.woa.com github.com "$WORK/fetch.trace" git -C "$WORK/fetch-client" \
-      fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
-    [ "$(git -C "$WORK/fetch-client" rev-parse "origin/$branch")" = "$sha" ] || fail "incremental fetch mismatch"
-    log "增量 Fetch 校验通过: index=$index sha=$sha"
-  done
-  step "6/6 删除源分支并验证镜像删除同步"
+  step "3/7 在 GitHub 源仓库创建第 1 个测试提交"
+  new_branch "$src" "$branch" 1
+  sha="${BRANCH_SHAS[-1]}"
+  step "4/7 等待第 1 个提交同步并从镜像 Fetch"
+  wait_ref "refs/heads/$branch" "$sha"
+  trace_git dev.bkcode.woa.com github.com "$WORK/fetch.trace" git -C "$WORK/fetch-client" \
+    fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+  [ "$(git -C "$WORK/fetch-client" rev-parse "origin/$branch")" = "$sha" ] || fail "incremental fetch mismatch"
+  log "增量 Fetch 校验通过: index=1 sha=$sha"
+  step "5/7 在同一分支创建第 2 个测试提交"
+  push_test_commit "$src" "$branch" 2
+  sha="${BRANCH_SHAS[-1]}"
+  step "6/7 等待第 2 个提交同步并再次从镜像 Fetch"
+  wait_ref "refs/heads/$branch" "$sha"
+  trace_git dev.bkcode.woa.com github.com "$WORK/fetch.trace" git -C "$WORK/fetch-client" \
+    fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+  [ "$(git -C "$WORK/fetch-client" rev-parse "origin/$branch")" = "$sha" ] || fail "incremental fetch mismatch"
+  log "增量 Fetch 校验通过: index=2 sha=$sha"
+  step "7/7 删除源分支并验证镜像删除同步"
   delete_refs "$src" "refs/heads/$branch"; wait_ref_absent "refs/heads/$branch"
   pass fetch-incremental "$started"
 }
