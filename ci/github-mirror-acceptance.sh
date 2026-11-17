@@ -267,7 +267,6 @@ scenario_clone_modes() {
   wait_ready
   clone_mirror "$WORK/shallow" --depth=1 --single-branch --branch main
   [ "$(git -C "$WORK/shallow" rev-parse --is-shallow-repository)" = true ] || fail "not shallow"
-  git -C "$WORK/shallow" fetch --deepen=1 origin
   git -C "$WORK/shallow" fetch --unshallow origin
   clone_mirror "$WORK/no-tags" --no-tags --depth=1
   tag="$(git ls-remote --tags "$SOURCE_URL" | awk '!/\^\{\}$/{sub("refs/tags/","",$2);print $2;exit}')"
@@ -452,7 +451,6 @@ scenario_large_repo() {
     [ "$(git -C "$dest" config --get remote.origin.promisor)" = true ] || fail "partial clone degraded"
     git -C "$dest" checkout "$default"
   done
-  git -C "$WORK/large-shallow-1" fetch --deepen=10 origin
   [ "${LARGE_REPO_FULL_CLONE:-false}" != true ] || git -C "$WORK/large-shallow-1" fetch --unshallow origin
   pass large-repo "$started"
 }
